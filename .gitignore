@@ -1,0 +1,72 @@
+# ============================================
+#  GLOBAL IGNORE (affects all microservices)
+# ============================================
+
+# Node modules in ANY folder
+**/node_modules/
+
+# Environment variables (DO NOT COMMIT SECRETS)
+**/.env
+**/.env.local
+**/.env.development
+**/.env.production
+**/.env.test
+
+# Build / output directories
+**/dist/
+**/build/
+**/.expo/
+**/.expo-shared/
+
+# Expo / React Native related
+.expo/
+.expo-shared/
+metro-cache/
+*.metro-cache/
+.babel/
+.cache/
+
+# Logs (any folder)
+**/*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Lock files (optional — keep if you want consistent versions)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+.history/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# TypeScript build info
+**/*.tsbuildinfo
+
+# Keys and signing files
+*.keystore
+*.jks
+*.p8
+*.p12
+*.key
+*.pem
+*.mobileprovision
+
+# Coverage / test output
+coverage/
+**/coverage/
+
+# Expo asset caches
+assets/.expo/

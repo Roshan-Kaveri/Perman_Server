@@ -6,81 +6,141 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const router = Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// ------------------------------------------------
+// SAFE GEMINI GENERATION WITH RETRY
+// ------------------------------------------------
+async function safeGenerate(model, prompt, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await model.generateContent(prompt);
+    } catch (err) {
+      if (err.status === 503 || err.status === 429) {
+        const delay = 500 * (i + 1);
+        console.warn(
+          `Gemini overloaded (retry ${i + 1}/${retries}), waiting ${delay}ms`
+        );
+        await new Promise((res) => setTimeout(res, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("Gemini failed after retries");
+}
+
+// ------------------------------------------------
+// FALLBACK SUMMARIES
+// ------------------------------------------------
+function fallbackMonthlySummary(trans, month, year) {
+  const total = trans.reduce((sum, t) => sum + t.amount, 0);
+  return `Summary for ${month}/${year}: Total spending ₹${total}.`;
+}
+
+function fallbackYearlySummary(monthSummaries, year) {
+  return `Yearly summary for ${year}. Months recorded: ${monthSummaries.length}.`;
+}
+
+// ------------------------------------------------
+// MAIN ROUTE
+// ------------------------------------------------
 router.post("/update", async (req, res) => {
   try {
     const { transactions, year, month, userId } = req.body;
 
-    if (!transactions || !Array.isArray(transactions) || !transactions.length) {
-      return res.status(400).json({ error: "Transactions list is required" });
-    }
+    if (!transactions?.length)
+      return res.status(400).json({ error: "Transactions list required" });
 
-    if (!year || !month || !userId) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
-
-    const textData = transactions
-      .map((tx) => `${tx.date}: ${tx.type} of ${tx.amount}`)
-      .join("\n");
+    if (!year || !month || !userId)
+      return res.status(400).json({ error: "Missing year/month/userId" });
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // ------------------------------
-    // MONTHLY SUMMARY
-    // ------------------------------
+    // -----------------------------------------
+    // PREPARE CLEAN TRANSACTION TEXT
+    // -----------------------------------------
+    const monthText = transactions
+      .map((t) => `${t.type}: ₹${t.amount} on ${t.date}`)
+      .join("\n");
+
+    // -----------------------------------------
+    // MONTHLY SUMMARY FIRST (STRICT ORDER)
+    // -----------------------------------------
+    let monthlySummary = "";
     const monthlyPrompt = `
-Create a clear, friendly monthly summary for ${month}/${year} based on these transactions:
+Act as a Chartered Accountant.
+Summarize spending for ${month}/${year}.
+Transactions:
+${monthText}
 
-${textData}
+Write short, clean, helpful insights.
+Mention bad spending patterns + 1–2 financial tips.
+    `;
 
-Keep it simple, readable, and helpful.
-`;
+    try {
+      const result = await safeGenerate(model, monthlyPrompt);
+      monthlySummary = result.response.text();
+    } catch (err) {
+      console.error("Monthly AI failed, fallback:", err.message);
+      monthlySummary = fallbackMonthlySummary(transactions, month, year);
+    }
 
-    const monthlyResult = await model.generateContent(monthlyPrompt);
-    const monthlySummary = monthlyResult.response.text();
-
+    // SAVE MONTHLY SUMMARY BEFORE YEARLY PROCESS
     await Monthly.updateOne(
       { userId, year, month },
-      {
-        summary: monthlySummary,
-        updatedAt: new Date(),
-      },
+      { summary: monthlySummary, updatedAt: new Date() },
       { upsert: true }
     );
 
-    // ------------------------------
-    // YEARLY SUMMARY
-    // ------------------------------
+    // -----------------------------------------
+    // AFTER MONTHLY SAVE → YEARLY SUMMARY
+    // -----------------------------------------
+    let yearlySummary = "";
+
+    // 1. Fetch all monthly summaries (latest versions)
+    const allMonthly = await Monthly.find({ userId, year }).sort({ month: 1 });
+
+    // 2. Combine minimal text
+    const combined = allMonthly
+      .map((m) => `${m.month}: ${m.summary}`)
+      .join("\n");
+
     const yearlyPrompt = `
-Create a clear yearly financial summary for the year ${year}:
+Create a clean YEARLY financial summary for ${year}.
+Use these monthly summaries:
+${combined}
 
-${textData}
+Keep short, structured: total spending pattern, improvement areas, advice.
+    `;
 
-Keep the tone simple and easy to understand.
-`;
+    try {
+      const yr = await safeGenerate(model, yearlyPrompt);
+      yearlySummary = yr.response.text();
+    } catch (err) {
+      console.error("Yearly AI failed, fallback:", err.message);
+      yearlySummary = fallbackYearlySummary(allMonthly, year);
+    }
 
-    const yearlyResult = await model.generateContent(yearlyPrompt);
-    const yearlySummary = yearlyResult.response.text();
-
+    // 3. Save yearly summary
     await Yearly.updateOne(
       { userId, year },
-      {
-        summary: yearlySummary,
-        updatedAt: new Date(),
-      },
+      { summary: yearlySummary, updatedAt: new Date() },
       { upsert: true }
     );
 
-    // ------------------------------
-    // RESPONSE
-    // ------------------------------
+    // -----------------------------------------
+    // RETURN (fast response, no delay)
+    // -----------------------------------------
     res.json({
-      message: "Summaries updated successfully",
+      message: "AI monthly + yearly summary updated (sequential + safe)",
       monthlySummary,
       yearlySummary,
     });
   } catch (err) {
-    console.error("Summary Error:", err);
-    res.status(500).json({ error: "AI Summary generation failed" });
+    console.error("AI Summary Error (Crash Safe):", err);
+    res.status(200).json({
+      message: "Summary update partial. AI may be overloaded.",
+      monthlySummary: "AI temporarily unavailable",
+    });
   }
 });
 

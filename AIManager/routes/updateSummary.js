@@ -6,15 +6,15 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const router = Router();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// -------------------------------------------
-// POST /summary
-// Body: { transactions: [], year, month, userId }
-// -------------------------------------------
-router.post("/", async (req, res) => {
+router.post("/update", async (req, res) => {
   try {
     const { transactions, year, month, userId } = req.body;
 
-    if (!transactions || !year || !month || !userId) {
+    if (!transactions || !Array.isArray(transactions) || !transactions.length) {
+      return res.status(400).json({ error: "Transactions list is required" });
+    }
+
+    if (!year || !month || !userId) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
@@ -24,17 +24,20 @@ router.post("/", async (req, res) => {
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // ---- Monthly summary AI prompt ----
+    // ------------------------------
+    // MONTHLY SUMMARY
+    // ------------------------------
     const monthlyPrompt = `
-Summarize these transactions for ${month}/${year}:
+Create a clear, friendly monthly summary for ${month}/${year} based on these transactions:
 
 ${textData}
+
+Keep it simple, readable, and helpful.
 `;
 
     const monthlyResult = await model.generateContent(monthlyPrompt);
     const monthlySummary = monthlyResult.response.text();
 
-    // Save monthly summary
     await Monthly.updateOne(
       { userId, year, month },
       {
@@ -44,11 +47,15 @@ ${textData}
       { upsert: true }
     );
 
-    // ---- Yearly summary AI prompt ----
+    // ------------------------------
+    // YEARLY SUMMARY
+    // ------------------------------
     const yearlyPrompt = `
-Summarize all transactions for year ${year}:
+Create a clear yearly financial summary for the year ${year}:
 
 ${textData}
+
+Keep the tone simple and easy to understand.
 `;
 
     const yearlyResult = await model.generateContent(yearlyPrompt);
@@ -63,6 +70,9 @@ ${textData}
       { upsert: true }
     );
 
+    // ------------------------------
+    // RESPONSE
+    // ------------------------------
     res.json({
       message: "Summaries updated successfully",
       monthlySummary,

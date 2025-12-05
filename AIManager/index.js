@@ -24,8 +24,8 @@ app.use("/summary", get_summary);
 
 async function startServer() {
   await connectDB();
-  app.listen(3001, () => {
-    console.log(`Server running on http://localhost:${3001}`);
+  app.listen(3002, () => {
+    console.log(`Server running on http://localhost:${3002}`);
   });
 }
 

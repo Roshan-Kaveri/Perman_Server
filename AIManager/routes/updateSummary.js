@@ -41,6 +41,26 @@ function fallbackYearlySummary(monthSummaries, year) {
 }
 
 // ------------------------------------------------
+// NEW → Compute accurate totals BEFORE sending to AI
+// ------------------------------------------------
+function computeTotals(transactions) {
+  let totalSpent = 0;
+  let totalReceived = 0;
+
+  transactions.forEach((t) => {
+    const amt = Number(t.amount);
+    if (amt < 0) totalSpent += Math.abs(amt);
+    else totalReceived += amt;
+  });
+
+  return {
+    totalSpent,
+    totalReceived,
+    netBalance: totalReceived - totalSpent,
+  };
+}
+
+// ------------------------------------------------
 // MAIN ROUTE
 // ------------------------------------------------
 router.post("/update", async (req, res) => {
@@ -56,24 +76,57 @@ router.post("/update", async (req, res) => {
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     // -----------------------------------------
-    // PREPARE CLEAN TRANSACTION TEXT
+    // 1. NEW — Safe numeric preprocessing
+    // -----------------------------------------
+    const { totalSpent, totalReceived, netBalance } =
+      computeTotals(transactions);
+
+    const notes = transactions
+      .map(
+        (t) => `• ${t.note || "No note"} (₹${t.amount}, ${t.type}, ${t.req})`
+      )
+      .join("\n");
+
+    // -----------------------------------------
+    // 2. PREPARE CLEAN TRANSACTION TEXT (unchanged)
     // -----------------------------------------
     const monthText = transactions
       .map((t) => `${t.type}: ₹${t.amount} on ${t.date}`)
       .join("\n");
 
     // -----------------------------------------
-    // MONTHLY SUMMARY FIRST (STRICT ORDER)
+    // MONTHLY SUMMARY (STRICT ORDER)
     // -----------------------------------------
     let monthlySummary = "";
+
+    // NEW → AI prompt improved, includes precomputed totals
     const monthlyPrompt = `
-Act as a Chartered Accountant.
-Summarize spending for ${month}/${year}.
+You are a financial assistant.
+
+IMPORTANT RULES:
+- DO NOT calculate totals yourself.
+- ONLY use the computed values provided below.
+- Use notes for behavior interpretation, not for calculations.
+
+Precomputed financial totals:
+• Total Spent: ₹${totalSpent}
+• Total Received: ₹${totalReceived}
+• Net Balance: ₹${netBalance}
+
 Transactions:
 ${monthText}
 
-Write short, clean, helpful insights.
-Mention bad spending patterns + 1–2 financial tips.
+Additional Notes:
+${notes}
+
+TASK:
+Write a 50 word monthly financial summary.
+Include:
+- spending behaviour
+- good or bad patterns
+- insights based on notes
+- 1–2 practical improvements
+Avoid repeating the same number multiple times.
     `;
 
     try {
@@ -84,32 +137,41 @@ Mention bad spending patterns + 1–2 financial tips.
       monthlySummary = fallbackMonthlySummary(transactions, month, year);
     }
 
-    // SAVE MONTHLY SUMMARY BEFORE YEARLY PROCESS
+    // SAVE MONTHLY SUMMARY
     await Monthly.updateOne(
       { userId, year, month },
-      { summary: monthlySummary, updatedAt: new Date() },
+      {
+        summary: monthlySummary,
+        totalSpent,
+        totalReceived,
+        netBalance,
+        updatedAt: new Date(),
+      },
       { upsert: true }
     );
 
     // -----------------------------------------
-    // AFTER MONTHLY SAVE → YEARLY SUMMARY
+    // YEARLY SUMMARY
     // -----------------------------------------
     let yearlySummary = "";
-
-    // 1. Fetch all monthly summaries (latest versions)
     const allMonthly = await Monthly.find({ userId, year }).sort({ month: 1 });
 
-    // 2. Combine minimal text
     const combined = allMonthly
       .map((m) => `${m.month}: ${m.summary}`)
       .join("\n");
 
     const yearlyPrompt = `
-Create a clean YEARLY financial summary for ${year}.
-Use these monthly summaries:
-${combined}
+Write a structured YEARLY summary for ${year} based on monthly summaries.
 
-Keep short, structured: total spending pattern, improvement areas, advice.
+RULES:
+- Do NOT calculate totals.
+- Highlight patterns across months.
+- Mention improvements & behaviour changes.
+- Keep it clean, factual, professional.
+- 50 words limit
+
+Monthly summaries:
+${combined}
     `;
 
     try {
@@ -120,7 +182,6 @@ Keep short, structured: total spending pattern, improvement areas, advice.
       yearlySummary = fallbackYearlySummary(allMonthly, year);
     }
 
-    // 3. Save yearly summary
     await Yearly.updateOne(
       { userId, year },
       { summary: yearlySummary, updatedAt: new Date() },
@@ -128,12 +189,15 @@ Keep short, structured: total spending pattern, improvement areas, advice.
     );
 
     // -----------------------------------------
-    // RETURN (fast response, no delay)
+    // FINAL RESPONSE (same as before)
     // -----------------------------------------
     res.json({
-      message: "AI monthly + yearly summary updated (sequential + safe)",
+      message: "AI monthly + yearly summary updated",
       monthlySummary,
       yearlySummary,
+      totalSpent,
+      totalReceived,
+      netBalance,
     });
   } catch (err) {
     console.error("AI Summary Error (Crash Safe):", err);

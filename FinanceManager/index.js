@@ -9,16 +9,16 @@ import deleteExpenseRoutes from "./routes/deleteTransaction.js";
 import cors from "cors";
 
 const app = express();
-const PORT = 3001;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(cors());
 async function startServer() {
   await connectDB();
-  app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
   console.log(await Expense.find().select());
 }
 

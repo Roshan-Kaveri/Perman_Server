@@ -21,11 +21,12 @@ mongoose
 // Routes
 app.use("/summary", update_summary);
 app.use("/summary", get_summary);
-
+const port = process.env.PORT || 3000;
 async function startServer() {
   await connectDB();
-  app.listen(3002, () => {
-    console.log(`Server running on http://localhost:${3002}`);
+
+  app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
   });
 }
 

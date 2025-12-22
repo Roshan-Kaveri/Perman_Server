@@ -4,6 +4,7 @@ import connectDB from "./config/db.js";
 import Expense from "./models/Expense.js";
 import getTransactionRoute from "./routes/getTransactions.js";
 import addTransactionRoute from "./routes/addTransactions.js";
+import deleteExpenseRoutes from "./routes/deleteTransaction.js";
 
 import cors from "cors";
 
@@ -29,6 +30,7 @@ app.get("/api/", check_auth, (req, res) => {
 
 app.use("/api/", getTransactionRoute);
 app.use("/api/", addTransactionRoute);
+app.use("/api/", deleteExpenseRoutes);
 
 app.post("/api/data", (req, res) => {
   res.json({

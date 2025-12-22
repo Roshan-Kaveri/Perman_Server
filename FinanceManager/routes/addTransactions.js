@@ -5,7 +5,7 @@ import axios from "axios";
 const router = express.Router();
 
 // AI service base URL
-const AI_SERVICE_URL = "http://localhost:3002/summary/update";
+const AI_SERVICE_URL = "http://127.0.0.1:3002/summary/update";
 
 // Fire & forget helper (no await, no blocking)
 const triggerAISummaryUpdate = async (payload) => {

@@ -65,6 +65,7 @@ function computeTotals(transactions) {
 // ------------------------------------------------
 router.post("/update", async (req, res) => {
   try {
+    console.log("recieved req");
     const { transactions, year, month, userId } = req.body;
 
     if (!transactions?.length)
